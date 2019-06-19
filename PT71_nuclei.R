@@ -1,17 +1,27 @@
 #### Corelation of IRF1 and pSTAT1 ####
 ## microscopic data ##
-source("/Users/piotrt/Documents/IPPT_PT/R/basic_scripts/normalize_data.R")
-source("/Users/piotrt/Documents/IPPT_PT/R/basic_scripts/theme_jetka.R")
-#### data preparation- loading and normalization ####
+os <- Sys.info()["sysname"]
 experiment <- "PT71"
-path <- paste("/Users/piotrt/Documents/IPPT_PT/ICF/Eksperymenty/",
-              experiment, "/R/", sep='')
+if(os == "Windows"){
+  source("D:/Piotrek/scripts/basic_scripts/normalize_data.R")
+  source("D:/Piotrek/scripts/basic_scripts/theme_jetka.R")
+  path <- paste("D:/Piotrek/Experiments/ICF/",
+                experiment, "/R/", sep='')
+  
+} else {
+  source("/Users/piotrt/Documents/IPPT_PT/R/basic_scripts/normalize_data.R")
+  source("/Users/piotrt/Documents/IPPT_PT/R/basic_scripts/theme_jetka.R")
+  path <- paste("/Users/piotrt/Documents/IPPT_PT/ICF/Eksperymenty/",
+                experiment, "/R/", sep='')
+}
+#### data preparation- loading and normalization ####
 normaliz <- "input/raw/"
 reading <- "second"
-
-setwd(path)
+project <- "nuclear_proximity"
+setwd(paste(path, project, sep = "/"))
 load.bio.nuclei <- function(dye, path, normaliz,
-                               front.columns = 5, back.columns = 12){
+                               front.columns = 5, 
+                            back.columns = 12){
   
   df.nuc <- read.table(paste(path, normaliz, "ShrinkedNucleiMasked", 
                              '.csv', sep=''), 
@@ -19,11 +29,11 @@ load.bio.nuclei <- function(dye, path, normaliz,
 
   df.nuc <- normalize_data(df.nuc)$data
   
-  columns <- c("Intensity_IntegratedIntensity_Alexa488",
-               "Intensity_MeanIntensity_Alexa488")
+  columns <- c("Intensity_IntegratedIntensity_Alexa555",
+               "Intensity_MeanIntensity_Alexa555")
   
-  new.column.core <- c("Integrated_Alexa488",
-                       "Mean_Alexa488")
+  new.column.core <- c("Integrated_Alexa555",
+                       "Mean_Alexa555")
   
   df.nuc2 <- variable.subset(df.nuc, columns, 
                              new.columns = (new.column.core))
@@ -38,23 +48,21 @@ bio.df.nuclei <- load.bio.nuclei(path=path,
                                             reading, "/", sep = ""))
 head(bio.df.nuclei)
 
-# pomysł: dodać 4 kolumny: najbliższy, 2nd, 3rd i 4th. Leciec po dołkach, 
-# w każdej komórce lecieć po wierszach i dla każdego wiersza wykonać funkcję
-# która znajduje najbliższych 4 sąsiadów. Prawdopodobnie obliczenia zajmą 
-# dużo czasu, lepiej na PC.
-
 euc.dist <- function(x1, x2) {sqrt(sum((x1 - x2) ^ 2))}
 append.list <- function(list, appendix){ 
   list[[length(list)+1]] <- appendix
   return(list)
   }
 
-all.characteristic <- data.frame()
+numCores <- 12
 
-for(well in unique(bio.df.nuclei$well.name)){
+registerDoParallel(numCores)
+start <- Sys.time()
+all.characteristic <- foreach(well = unique(bio.df.nuclei$well.name), .combine=rbind) %dopar% {
+# all.characteristic <- foreach(well = unique(bio.df.nuclei$well.name)[1:2], .combine=rbind) %dopar% {
   
 # bio.well <- bio.df.nuclei[bio.df.nuclei$well.name ==
-#                             unique(bio.df.nuclei$well.name)[1], ][1:10, ]
+#                             unique(bio.df.nuclei$well.name)[1], ]
   bio.well <- bio.df.nuclei[bio.df.nuclei$well.name == well, ]
   
 well.nuclei <- length(bio.well[, 1])
@@ -63,11 +71,11 @@ list.of.used <- list(best = list(), closest = list())
 closests.df <-  setNames(data.frame(matrix(ncol = 8, nrow = well.nuclei)),
                          c("distance.best", 
                            "no.best", 
-                           "Mean_Alexa488.best", 
+                           "Mean_Alexa555.best", 
                            "benchamrk_difference.best",
                            "distance.closest", 
                            "no.closest", 
-                           "Mean_Alexa488.closest", 
+                           "Mean_Alexa555.closest", 
                            "benchamrk_difference.closest"))
 
 for(nuclei.start in (1:well.nuclei)){
@@ -75,9 +83,10 @@ for(nuclei.start in (1:well.nuclei)){
                                              "AreaShape_Center_Y")]
   relation.df <-  setNames(data.frame(matrix(ncol = 2, nrow = well.nuclei)),
                                       c("distance", "no"))
-  
-  fluo.benchmark <- bio.well[nuclei.start, ]$Mean_Alexa488
+  print(nuclei.start)
+  fluo.benchmark <- bio.well[nuclei.start, ]$Mean_Alexa555
   for(nuclei.neighbour in (1:well.nuclei)){
+
     
     coordinates.neighbour <- bio.well[nuclei.neighbour, 
                                       c("AreaShape_Center_X",
@@ -94,9 +103,9 @@ for(nuclei.start in (1:well.nuclei)){
       nucleus.characteristic.best <- rep(0, 4)
       nucleus.characteristic.close <- rep(0, 4)
     } else {
-    closest.cell$Mean_Alexa488 <- bio.well[closest.cell$no, ]$Mean_Alexa488
+    closest.cell$Mean_Alexa555 <- bio.well[closest.cell$no, ]$Mean_Alexa555
     closest.cell$benchamrk_difference <- 
-      abs(closest.cell$Mean_Alexa488 - fluo.benchmark)
+      abs(closest.cell$Mean_Alexa555 - fluo.benchmark)
     
     best.neighbout <- 
       which(closest.cell$benchamrk_difference==
@@ -124,7 +133,16 @@ for(nuclei.start in (1:well.nuclei)){
     closests.df[nuclei.start, ] <- nucleus.characteristic
     }
 }
-all.characteristic <- rbind(all.characteristic, closests.df)
+  closests.df
 }
-cbind(bio.df.nuclei, all.characteristic)
+stopImplicitCluster()
+stop <- Sys.time()
+stop-start
 
+head(all.characteristic)
+bio.df.related <- cbind(bio.df.nuclei, all.characteristic)
+
+write.csv(file = paste("output/proximity_relations_", experiment, ".csv", sep = ""),
+          x = bio.df.related)
+
+#### to do: make this script general (change to a function) ####
